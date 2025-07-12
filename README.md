@@ -8,7 +8,7 @@ A Model Context Protocol (MCP) server that allows executing predefined commands 
 - Execute dangerous commands with native macOS confirmation dialog
 - Support for pre-authorized dangerous commands (skip confirmation)
 - JSONC support (JSON with comments)
-- Reads configuration from `.claude/.danger-zone-exec.local.json`
+- Multiple configuration file formats supported (.jsonc and .json)
 - Fallback to global config in `~/.claude/` if project config not found
 - TypeScript implementation
 - Works with npx for easy execution
@@ -27,10 +27,15 @@ npx @koinunopochi/danger-zone-mcp
 
 ## Configuration
 
-Create a `.claude/.danger-zone-exec.local.json` file in your project root or home directory:
+Create a configuration file in your project root or home directory:
 
-1. **Project-specific config** (highest priority): `<project>/.claude/.danger-zone-exec.local.json`
-2. **Global config** (fallback): `~/.claude/.danger-zone-exec.local.json`
+1. **Project-specific config** (highest priority):
+   - `<project>/.claude/.danger-zone-exec.local.jsonc` (recommended for comments)
+   - `<project>/.claude/.danger-zone-exec.local.json`
+
+2. **Global config** (fallback):
+   - `~/.claude/.danger-zone-exec.jsonc` (recommended for comments)
+   - `~/.claude/.danger-zone-exec.json`
 
 ```jsonc
 {

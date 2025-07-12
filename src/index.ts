@@ -57,22 +57,38 @@ class DangerZoneMcpServer {
   }
 
   private async loadConfig(): Promise<void> {
+    const localConfigFileNames = [
+      '.danger-zone-exec.local.jsonc',
+      '.danger-zone-exec.local.json'
+    ];
+    
+    const globalConfigFileNames = [
+      '.danger-zone-exec.jsonc',
+      '.danger-zone-exec.json'
+    ];
+    
     try {
       // まずプロセスの実行ディレクトリから設定ファイルを探す
       const cwd = process.cwd();
-      const localConfigPath = path.join(cwd, '.claude', '.danger-zone-exec.local.json');
       
-      try {
-        const configData = await fs.readFile(localConfigPath, 'utf-8');
-        const rawConfig = parseJSONC(configData);
-        this.config = ConfigSchema.parse(rawConfig);
-        console.error(`Loaded config from: ${localConfigPath}`);
-        return;
-      } catch (localError) {
-        // ローカル設定が見つからない場合、ホームディレクトリを確認
-        const homeDir = process.env.HOME || process.env.USERPROFILE || '';
-        const globalConfigPath = path.join(homeDir, '.claude', '.danger-zone-exec.local.json');
-        
+      for (const fileName of localConfigFileNames) {
+        const localConfigPath = path.join(cwd, '.claude', fileName);
+        try {
+          const configData = await fs.readFile(localConfigPath, 'utf-8');
+          const rawConfig = parseJSONC(configData);
+          this.config = ConfigSchema.parse(rawConfig);
+          console.error(`Loaded config from: ${localConfigPath}`);
+          return;
+        } catch (localError) {
+          // このファイルが見つからない場合は次を試す
+        }
+      }
+      
+      // ローカル設定が見つからない場合、ホームディレクトリを確認
+      const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+      
+      for (const fileName of globalConfigFileNames) {
+        const globalConfigPath = path.join(homeDir, '.claude', fileName);
         try {
           const configData = await fs.readFile(globalConfigPath, 'utf-8');
           const rawConfig = parseJSONC(configData);
@@ -80,9 +96,11 @@ class DangerZoneMcpServer {
           console.error(`Loaded config from: ${globalConfigPath}`);
           return;
         } catch (globalError) {
-          console.error('No config found in project or home directory');
+          // このファイルが見つからない場合は次を試す
         }
       }
+      
+      console.error('No config found in project or home directory');
     } catch (error) {
       console.error('Failed to load config:', error);
     }
