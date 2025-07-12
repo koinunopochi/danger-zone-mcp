@@ -1,0 +1,41 @@
+{
+  // コメント: このファイルはJSONCフォーマットで記述できます
+  "commands": [
+    {
+      "name": "list_files",
+      "description": "List files in current directory",
+      "command": "ls",
+      "args": ["-la"]
+    },
+    {
+      "name": "show_directory",
+      "description": "Print working directory",
+      "command": "pwd"
+    },
+    {
+      "name": "check_chrome_mcp",
+      "description": "Check if MCP Chrome profile instances are running",
+      "command": "ps aux | grep -E '(Google Chrome.*mcp-chrome-profile)' | grep -v grep | wc -l"
+    }
+  ],
+  "dangerZone": [
+    {
+      "name": "kill_chrome_mcp",
+      "description": "Kill all Chrome instances with MCP profile",
+      "command": "pkill -f 'Google Chrome.*mcp-chrome-profile'",
+      "preAuthorized": true  // 事前許可済み - 確認ダイアログを表示しない
+    },
+    {
+      "name": "remove_all_files",
+      "description": "Remove all files in current directory",
+      "command": "rm -rf *"
+      // preAuthorized: false (デフォルト) - 確認ダイアログを表示
+    },
+    {
+      "name": "reset_git_hard",
+      "description": "Reset git repository to initial state",
+      "command": "git reset --hard HEAD",
+      "preAuthorized": false  // 明示的に確認が必要
+    }
+  ]
+}

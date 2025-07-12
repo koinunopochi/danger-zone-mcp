@@ -9,9 +9,11 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { promises as fs } from 'fs';
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import * as path from 'path';
+import * as readline from 'readline';
+import { parse as parseJSONC } from 'jsonc-parser';
 
 const execAsync = promisify(exec);
 
@@ -28,7 +30,7 @@ const ConfigSchema = z.object({
     name: z.string(),
     description: z.string(),
     command: z.string(),
-    requiresConfirm: z.boolean().default(true),
+    preAuthorized: z.boolean().optional().default(false),
   })).optional(),
 });
 
@@ -56,19 +58,36 @@ class DangerZoneMcpServer {
 
   private async loadConfig(): Promise<void> {
     try {
-      // プロセスの実行ディレクトリから設定ファイルを探す
+      // まずプロセスの実行ディレクトリから設定ファイルを探す
       const cwd = process.cwd();
-      const configPath = path.join(cwd, '.claude', '.danger-zone-exec.local.json');
+      const localConfigPath = path.join(cwd, '.claude', '.danger-zone-exec.local.json');
       
-      const configData = await fs.readFile(configPath, 'utf-8');
-      const rawConfig = JSON.parse(configData);
-      this.config = ConfigSchema.parse(rawConfig);
-      
-      console.error(`Loaded config from: ${configPath}`);
+      try {
+        const configData = await fs.readFile(localConfigPath, 'utf-8');
+        const rawConfig = parseJSONC(configData);
+        this.config = ConfigSchema.parse(rawConfig);
+        console.error(`Loaded config from: ${localConfigPath}`);
+        return;
+      } catch (localError) {
+        // ローカル設定が見つからない場合、ホームディレクトリを確認
+        const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+        const globalConfigPath = path.join(homeDir, '.claude', '.danger-zone-exec.local.json');
+        
+        try {
+          const configData = await fs.readFile(globalConfigPath, 'utf-8');
+          const rawConfig = parseJSONC(configData);
+          this.config = ConfigSchema.parse(rawConfig);
+          console.error(`Loaded config from: ${globalConfigPath}`);
+          return;
+        } catch (globalError) {
+          console.error('No config found in project or home directory');
+        }
+      }
     } catch (error) {
       console.error('Failed to load config:', error);
-      this.config = { commands: [], dangerZone: [] };
     }
+    
+    this.config = { commands: [], dangerZone: [] };
   }
 
   private setupHandlers(): void {
@@ -81,7 +100,7 @@ class DangerZoneMcpServer {
       if (this.config?.commands) {
         for (const cmd of this.config.commands) {
           tools.push({
-            name: `exec_${cmd.name}`,
+            name: cmd.name,
             description: cmd.description,
             inputSchema: {
               type: 'object',
@@ -101,7 +120,7 @@ class DangerZoneMcpServer {
       if (this.config?.dangerZone) {
         for (const cmd of this.config.dangerZone) {
           tools.push({
-            name: `danger_${cmd.name}`,
+            name: cmd.name,
             description: `[DANGER ZONE] ${cmd.description}`,
             inputSchema: {
               type: 'object',
@@ -111,7 +130,7 @@ class DangerZoneMcpServer {
                   description: 'Must be true to execute this dangerous command',
                 },
               },
-              required: cmd.requiresConfirm ? ['confirm'] : [],
+              required: ['confirm'],
             },
           });
         }
@@ -125,18 +144,9 @@ class DangerZoneMcpServer {
       
       await this.loadConfig();
       
-      // 通常のコマンド実行
-      if (name.startsWith('exec_')) {
-        const cmdName = name.replace('exec_', '');
-        const cmd = this.config?.commands?.find(c => c.name === cmdName);
-        
-        if (!cmd) {
-          throw new McpError(
-            ErrorCode.MethodNotFound,
-            `Command ${cmdName} not found`
-          );
-        }
-        
+      // 通常のコマンドを探す
+      const cmd = this.config?.commands?.find(c => c.name === name);
+      if (cmd) {
         try {
           const cmdArgs = (args?.args as string[]) || [];
           const fullCommand = [cmd.command, ...(cmd.args || []), ...cmdArgs].join(' ');
@@ -165,31 +175,27 @@ class DangerZoneMcpServer {
         }
       }
       
-      // Danger Zoneコマンド実行
-      if (name.startsWith('danger_')) {
-        const cmdName = name.replace('danger_', '');
-        const cmd = this.config?.dangerZone?.find(c => c.name === cmdName);
-        
-        if (!cmd) {
-          throw new McpError(
-            ErrorCode.MethodNotFound,
-            `Danger command ${cmdName} not found`
-          );
-        }
-        
-        if (cmd.requiresConfirm && args?.confirm !== true) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: 'This is a dangerous command. Please confirm by setting confirm: true',
-              },
-            ],
-          };
+      // Danger Zoneコマンドを探す
+      const dangerCmd = this.config?.dangerZone?.find(c => c.name === name);
+      if (dangerCmd) {
+        if (!dangerCmd.preAuthorized) {
+          // 事前許可がない場合のみ、インタラクティブな確認プロンプトを表示
+          const confirmed = await this.promptConfirmation(dangerCmd);
+          
+          if (!confirmed) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: 'Command execution cancelled by user',
+                },
+              ],
+            };
+          }
         }
         
         try {
-          const { stdout, stderr } = await execAsync(cmd.command, {
+          const { stdout, stderr } = await execAsync(dangerCmd.command, {
             cwd: process.cwd(),
           });
           
@@ -217,6 +223,33 @@ class DangerZoneMcpServer {
         ErrorCode.MethodNotFound,
         `Unknown tool: ${name}`
       );
+    });
+  }
+
+  private async promptConfirmation(cmd: any): Promise<boolean> {
+    return new Promise((resolve) => {
+      // AppleScriptを使用してmacOSのダイアログを表示
+      const script = `
+        display dialog "⚠️ DANGER ZONE ⚠️\\n\\nYou are about to execute:\\n${cmd.command}\\n\\n${cmd.description}\\n\\nAre you sure you want to continue?" ¬
+          buttons {"Cancel", "Execute"} ¬
+          default button "Cancel" ¬
+          cancel button "Cancel" ¬
+          with icon caution ¬
+          with title "Danger Zone Confirmation"
+      `;
+      
+      const osascript = spawn('osascript', ['-e', script]);
+      
+      osascript.on('close', (code) => {
+        // code 0 = Execute was clicked
+        // code 1 = Cancel was clicked or dialog was closed
+        resolve(code === 0);
+      });
+      
+      osascript.on('error', (err) => {
+        console.error('Failed to show confirmation dialog:', err);
+        resolve(false);
+      });
     });
   }
 
