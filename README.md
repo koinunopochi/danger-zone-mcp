@@ -2,6 +2,10 @@
 
 A Model Context Protocol (MCP) server that allows executing predefined commands with safety checks.
 
+<a href="https://glama.ai/mcp/servers/@koinunopochi/danger-zone-mcp">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@koinunopochi/danger-zone-mcp/badge" alt="Danger Zone MCP server" />
+</a>
+
 ## Features
 
 - Execute safe commands from configuration
